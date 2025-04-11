@@ -5,12 +5,10 @@ import time
 def load_vrp_file(filename):
     with open(filename, 'r') as file:
         lines = file.readlines()
-    
     nodes = []
     demands = {}
     depot = capacity = None
     reading_nodes = reading_demands = reading_depot = False
-    
     for line in lines:
         line = line.strip()
         if line.startswith("CAPACITY"):
@@ -30,7 +28,6 @@ def load_vrp_file(filename):
             continue
         elif line.startswith("EOF"):
             break
-        
         if reading_nodes:
             parts = line.split()
             nodes.append((int(parts[0]), int(parts[1]), int(parts[2])))
@@ -39,7 +36,6 @@ def load_vrp_file(filename):
             demands[int(parts[0])] = int(parts[1])
         elif reading_depot and int(line) > 0:
             depot = int(line)
-    
     return nodes, demands, depot, capacity, filename
 
 def save_to_csv(filename, data):
@@ -61,7 +57,7 @@ def evaluate(solution):
     cost = sum(dist_matrix[solution[i] - 1][solution[i + 1] - 1] for i in range(len(solution) - 1))
     return cost
 
-def back_to_depot(node, route, load):
+def back_to_depot(node, route, load, depot):
     new_route = list(route)
     if (load + demands[node] > capacity) and (new_route[-1] != depot):
         new_route.append(depot)  
@@ -70,7 +66,7 @@ def back_to_depot(node, route, load):
     load += demands[node]
     return new_route, load
 
-def cut_depot(route):
+def cut_depot(route, depot):
     new_route = list(route)
     while depot in new_route:
         new_route.remove(depot)
@@ -78,27 +74,50 @@ def cut_depot(route):
 
 def random_solution(load=0):
     sol = list(range(1, len(nodes) + 1))
-    sol = cut_depot(sol)
+    sol = cut_depot(sol, depot)
     random.shuffle(sol)
     route = [depot]
     for node in sol:
-        route, load = back_to_depot(node, route, load)
+        route, load = back_to_depot(node, route, load, depot)
     if route[-1] != depot:
         route.append(depot)
     return route
 
+#def greedy_algorithm(load=0):
+    greedy_pop = []
+    for n in range(1, len(nodes) + 1):
+        unvisited = set(range(1, len(nodes) + 1))
+        unvisited = cut_depot(unvisited, n)
+        route = [n]
+        while unvisited:
+            last = route[-1]
+            greed = min(unvisited, key = lambda x: dist_matrix[last - 1][x - 1])
+            route, load = back_to_depot(greed, route, load, n)
+            unvisited.remove(greed)
+        if route[-1] != n:
+            route.append(n)
+        greedy_pop.append(route)
+    return greedy_pop
+
 def greedy_algorithm(load=0):
-    unvisited = set(range(1, len(nodes) + 1))
-    unvisited = cut_depot(unvisited)
-    route = [depot]
-    while unvisited:
-        last = route[-1]
-        greed = min(unvisited, key = lambda x: dist_matrix[last - 1][x - 1])
-        route, load = back_to_depot(greed, route, load)
-        unvisited.remove(greed)
-    if route[-1] != depot:
-        route.append(depot)
-    return route
+    greedy_pop = []
+    n_init = set(range(1, len(nodes) + 1))
+    n_init = cut_depot(n_init, depot)
+    for n in n_init:
+        unvisited = set(range(1, len(nodes) + 1))
+        unvisited = cut_depot(unvisited, depot)
+        unvisited.remove(n)
+        route = [depot, n]
+        while unvisited:
+            last = route[-1]
+            greed = min(unvisited, key = lambda x: dist_matrix[last - 1][x - 1])
+            route, load = back_to_depot(greed, route, load, depot)
+            unvisited.remove(greed)
+        if route[-1] != depot:
+            route.append(depot)
+        greedy_pop.append(route)
+
+    return greedy_pop
 
 class TabuSearch:
     def __init__(self, max_iterations=10000, tabu_size=10, neighborhood=40):
@@ -108,14 +127,14 @@ class TabuSearch:
 
     def get_neighbors(self, solution, load=0):
         neighbors = []
-        solution = cut_depot(solution)
+        solution = cut_depot(solution, depot)
         for _ in range(self.neighborhood):
             neighbor = list(solution)
             i, j = random.sample(range(len(neighbor)), 2)
             neighbor[i], neighbor[j] = neighbor[j], neighbor[i]
             new_solution = [depot]
             for node in neighbor:
-                new_solution, load = back_to_depot(node, new_solution, load)
+                new_solution, load = back_to_depot(node, new_solution, load, depot)
             if new_solution[-1] != depot:
                 new_solution.append(depot)
             neighbors.append(new_solution)
@@ -145,13 +164,13 @@ class TabuSearch:
             if len(tabu_list) > self.tabu_size:
                 tabu_list.pop(0)
             write_TS.append([i+1, evaluate(best_solution)])
-        save_to_csv("c:\\Users\\Michał\\Documents\\Studia\\Magisterskie\\1semestr\\Metody optymalizacji\\projekt0_met_opt.csv", write_TS)
+        #save_to_csv("c:\\Users\\Michał\\Documents\\Studia\\Magisterskie\\1semestr\\Metody optymalizacji\\projekt0_met_opt.csv", write_TS)
         return best_solution
 
 class EvolutionAlgorithm:
-    def __init__(self, pop_size=1000, epoch=250, cross_prob=0.9, mut_prob=0.4, Tour=20, elite_ratio=0.1):
+    def __init__(self, pop_size=1000, generations=250, cross_prob=0.9, mut_prob=0.4, Tour=2, elite_ratio=0.1):
         self.pop_size = pop_size
-        self.epoch = epoch
+        self.generations = generations
         self.cross_prob = cross_prob
         self.mut_prob = mut_prob
         self.Tour = Tour
@@ -162,9 +181,9 @@ class EvolutionAlgorithm:
 
     def evolve(self):
         write_EA = []
-        write_EA.append([instance + ', Pop_size: ' + str(ea.pop_size) + ', Epoch: ' + str(ea.epoch) + ', Cross_prob: ' + str(ea.cross_prob) + ', Mut_prob: ' + str(ea.mut_prob) + ', Tour: ' + str(ea.Tour) + ', Mutacja: swap' + ', Krzyzowanie: OX'])
+        write_EA.append([instance + ', Pop_size: ' + str(ea.pop_size) + ', Gens: ' + str(ea.generations) + ', Cross_prob: ' + str(ea.cross_prob) + ', Mut_prob: ' + str(ea.mut_prob) + ', Tour: ' + str(ea.Tour)+ ', elite_ratio: ' + str(ea.elite_ratio) + ', Mutacja: swap' + ', Krzyzowanie: OX'])
         write_EA.append(['Epoka EA', 'best', 'average', 'worst'])
-        for i in range(self.epoch):
+        for i in range(self.generations):
             new_pop = []
             for individual in self.selection_elitism():
                 new_pop.append(individual)
@@ -175,10 +194,10 @@ class EvolutionAlgorithm:
                     individual = self.crossover_OX(p1, p2)
                 else: individual = list(p1)
                 if random.random() < self.mut_prob:
-                    individual = self.mutate_swap(individual)
+                    individual = self.mutate_inverse(individual)
                 new_pop.append(individual)
             self.pop = new_pop
-        write_EA.append([int(self.epoch), evaluate(ea.best_solution(self.pop)), ea.avg_solution(self.pop), evaluate(ea.worst_solution(self.pop))])
+        write_EA.append([int(self.generations), evaluate(ea.best_solution(self.pop)), ea.avg_solution(self.pop), evaluate(ea.worst_solution(self.pop))])
         #save_to_csv("c:\\Users\\Michał\\Documents\\Studia\\Magisterskie\\1semestr\\Metody optymalizacji\\projekt0_met_opt.csv", write_EA)
 
     def selection_elitism(self):
@@ -192,8 +211,8 @@ class EvolutionAlgorithm:
         return best_individual
     
     def crossover_OX(self, p1, p2, load=0):
-        p1 = cut_depot(p1)
-        p2 = cut_depot(p2)
+        p1 = cut_depot(p1, depot)
+        p2 = cut_depot(p2, depot)
         cut1, cut2 = sorted(random.sample(range(len(p1)), 2))
         p1_part = []
         p2_part = []
@@ -211,18 +230,79 @@ class EvolutionAlgorithm:
                 p2_part_node += 1
         individual = [depot]
         for node in o1:
-            individual, load = back_to_depot(node, individual, load)
+            individual, load = back_to_depot(node, individual, load, depot)
         if individual[-1] != depot:
                 individual.append(depot)
         return individual
     
+    def crossover_CX(self, p1, p2, load=0):
+        p1 = cut_depot(p1, depot)
+        p2 = cut_depot(p2, depot)
+        o1 = [None] * len(p1)
+        visited = [False] * len(p1)
+        cycle_step = 0
+        cycle_positions = []
+        while not visited[cycle_step]:
+            visited[cycle_step] = True
+            cycle_positions.append(cycle_step)
+            cycle_step = p1.index(p2[cycle_step])
+        for position in cycle_positions:
+            o1[position] = p1[position]
+        for i in range(len(p1)):
+            if o1[i] is None:
+                o1[i] = p2[i]
+        individual = [depot]
+        for node in o1:
+            individual, load = back_to_depot(node, individual, load, depot)
+        if individual[-1] != depot:
+                individual.append(depot)
+        return individual
+
+    def mutate_swap_proportion(self, solution, load=0):
+            solution = cut_depot(solution, depot)
+            swapped=set()
+            for node in range(len(solution)):
+                if random.random() < self.mut_prob and node not in swapped:
+                    sol_without_node = []
+                    for i in range(len(solution)):
+                        if i != node and i not in swapped:
+                            sol_without_node.append(i)
+                    if sol_without_node:
+                        swap = random.choice(sol_without_node)
+                        solution[swap], solution[node] = solution[node], solution[swap]
+                        swapped.update({node, swap})
+            new_solution = [depot]
+            for node in solution:
+                new_solution, load = back_to_depot(node, new_solution, load, depot)
+            if new_solution[-1] != depot:
+                new_solution.append(depot)
+            return new_solution
+    
+    def mutate_inverse(self, solution, load=0):
+            solution = cut_depot(solution, depot)
+            inverse = [None] * len(solution)
+            cut1, cut2 = sorted(random.sample(range(len(solution)), 2))
+            node_inverse = cut2
+            for node_solution in range(cut1, cut2+1):
+                inverse[node_inverse] = solution[node_solution]
+                node_inverse -= 1
+            for node in range(len(inverse)):
+                if inverse[node] is None:
+                    inverse[node] = solution[node]
+            new_solution = [depot]
+            for node in inverse:
+                new_solution, load = back_to_depot(node, new_solution, load, depot)
+            if new_solution[-1] != depot:
+                new_solution.append(depot)
+            return new_solution
+    
     def mutate_swap(self, solution, load=0):
-            solution = cut_depot(solution)
+            solution = cut_depot(solution, depot)
             i, j = random.sample(range(len(solution)), 2)
             solution[i], solution[j] = solution[j], solution[i]
             new_solution = [depot]
             for node in solution:
-                new_solution, load = back_to_depot(node, new_solution, load)
+                new_solution, load = back_to_depot(node, new_solution, load, depot)
             if new_solution[-1] != depot:
                 new_solution.append(depot)
             return new_solution
@@ -251,15 +331,14 @@ if __name__ == "__main__":
 
     for i in range(10000):
         random_pop.append(random_solution())
-    
-    greedy_cost = evaluate(greedy_algorithm())
 
     ea.evolve()
 
     best_tabu_solution = ts.search(random_solution())
+    greedy_pop = greedy_algorithm()
     
     #write.append(['instancja', 'Optymalny wynik', 'Algorytm losowy[10k]', None, None, None, 'Algorytm zachlanny[n]', None, None, None, 'Algorytm Ewolucyjny[10x]', None, None, None, 'TS[10x]', None, None, None, 'Czas wykonania [s]'])
     end_time = time.time()
-    write.append([instance, evaluate(min(ea.best_solution(random_pop), greedy_algorithm(), ea.best_solution(ea.pop), best_tabu_solution , key=lambda p: evaluate(p))), evaluate(ea.best_solution(random_pop)), evaluate(ea.worst_solution(random_pop)), ea.avg_solution(random_pop), None, greedy_cost, greedy_cost, greedy_cost, 0, evaluate(ea.best_solution(ea.pop)), None, None, None, evaluate(best_tabu_solution), None, None, None, end_time-start_time])
+    write.append([instance, None, evaluate(ea.best_solution(random_pop)), None, None, None, evaluate(ea.best_solution(greedy_pop)), None, evaluate(ea.worst_solution(greedy_pop)), str(list(evaluate(x) for x in greedy_pop)), evaluate(ea.best_solution(ea.pop)), None, None, None, evaluate(best_tabu_solution), None, None, None, end_time-start_time])
     save_to_csv("c:\\Users\\Michał\\Documents\\Studia\\Magisterskie\\1semestr\\Metody optymalizacji\\projekt0_tab_met_opt.csv", write)
     
